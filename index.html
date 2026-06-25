@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apple Container Dashboard — Orchestration Visualizer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0f;--surface:#141419;--surface2:#1c1c24;--border:#2a2a36;
+  --text:#e8e8ec;--text2:#9a9aab;--accent:#3b82f6;--accent2:#06b6d4;
+  --success:#10b981;--warn:#f59e0b;--danger:#ef4444;
+}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text)}
+#app{display:grid;grid-template-columns:280px 1fr 320px;grid-template-rows:auto 1fr;height:100vh;gap:1px;background:var(--border)}
+
+/* Header */
+.header{grid-column:1/-1;background:var(--surface);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.header h1{font-size:16px;font-weight:600;letter-spacing:-0.3px;display:flex;align-items:center;gap:8px}
+.header h1 .dot{width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse-dot 2s infinite}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+.header .meta{display:flex;gap:16px;font-size:12px;color:var(--text2)}
+.header .meta span{display:flex;align-items:center;gap:4px}
+.status-badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;background:rgba(16,185,129,.15);color:var(--success);border:1px solid rgba(16,185,129,.3)}
+
+/* Sidebar */
+.sidebar{background:var(--surface);padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.sidebar h3{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin-bottom:4px}
+.stat-card{background:var(--surface2);border-radius:8px;padding:12px;border:1px solid var(--border)}
+.stat-card .label{font-size:11px;color:var(--text2);margin-bottom:6px}
+.stat-card .value{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat-card .value.blue{color:var(--accent)}
+.stat-card .value.cyan{color:var(--accent2)}
+.stat-card .value.green{color:var(--success)}
+.stat-card .bar{height:4px;background:var(--border);border-radius:2px;margin-top:8px;overflow:hidden}
+.stat-card .bar-fill{height:100%;border-radius:2px;transition:width .5s}
+.cluster-info{background:var(--surface2);border-radius:8px;padding:12px;border:1px solid var(--border)}
+.cluster-info .row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.cluster-info .row:last-child{border:none}
+.cluster-info .row .k{color:var(--text2)}
+
+/* Main canvas area */
+.main{display:flex;flex-direction:column;gap:1px;background:var(--border)}
+#topo-canvas-wrap{flex:1;position:relative;background:var(--bg);overflow:hidden}
+#topo-canvas{width:100%;height:100%;display:block}
+#bottom-panel{height:200px;background:var(--surface);display:grid;grid-template-columns:1fr 1fr;gap:1px}
+.chart-box{background:var(--bg);padding:10px;overflow:hidden}
+.chart-box h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin-bottom:6px}
+
+/* Right panel */
+.right-panel{background:var(--surface);padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.event-log{flex:1;min-height:0;display:flex;flex-direction:column}
+.event-log h3{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);flex-shrink:0}
+.log-entries{flex:1;overflow-y:auto;font-size:11px;font-family:'SF Mono',Monaco,Consolas,monospace;line-height:1.6}
+.log-entry{padding:4px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;opacity:0;animation:fade-in .3s forwards}
+.log-entry .ts{color:var(--text2);white-space:nowrap}
+.log-entry .msg{color:var(--text)}
+.log-entry.info .msg{color:var(--accent2)}
+.log-entry.success .msg{color:var(--success)}
+.log-entry.warn .msg{color:var(--warn)}
+@keyframes fade-in{to{opacity:1}}
+
+/* Container cards in sidebar */
+.containers-list{flex:1;overflow-y:auto}
+.containers-list h3{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin-bottom:4px}
+.cont-card{background:var(--surface2);border-radius:6px;padding:8px 10px;border-left:3px solid var(--border);margin-bottom:6px;cursor:pointer;transition:all .2s}
+.cont-card:hover{background:var(--border)}
+.cont-card.active{border-left-color:var(--accent);background:rgba(59,130,246,.08)}
+.cont-card .name{font-size:12px;font-weight:500;margin-bottom:4px}
+.cont-card .meta{font-size:10px;color:var(--text2);display:flex;gap:8px}
+.cont-card .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.cont-card .status-dot.up{background:var(--success)}
+.cont-card .status-dot.stopped{background:var(--danger)}
+
+/* Controls */
+.controls{display:flex;gap:6px;flex-wrap:wrap}
+.btn{padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;cursor:pointer;transition:all .2s}
+.btn:hover{background:var(--border);border-color:var(--accent)}
+.btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* Metrics canvas */
+.mini-chart{width:100%;height:80px;border-radius:4px;overflow:hidden;background:var(--surface)}
+
+/* Tooltip */
+#tooltip{position:fixed;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;pointer-events:none;z-index:100;opacity:0;transition:opacity .15s;box-shadow:0 8px 32px rgba(0,0,0,.5);max-width:220px}
+#tooltip.show{opacity:1}
+#tooltip .tip-name{font-weight:600;margin-bottom:4px}
+#tooltip .tip-row{display:flex;justify-content:space-between;gap:12px;color:var(--text2);font-size:11px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <h1><span class="dot"></span>Apple Container Orchestrator</h1>
+    <div class="meta">
+      <span class="status-badge">● CLUSTER HEALTHY</span>
+      <span id="clock"></span>
+      <span>v4.2.1</span>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="controls">
+      <button class="btn active" onclick="setView('cluster')">Cluster</button>
+      <button class="btn" onclick="setView('network')">Network</button>
+      <button class="btn" onclick="triggerDeploy()">▶ Deploy</button>
+    </div>
+
+    <h3>Cluster Overview</h3>
+    <div class="stat-card">
+      <div class="label">Active Containers</div>
+      <div class="value blue" id="stat-containers">0</div>
+      <div class="bar"><div class="bar-fill" id="bar-containers" style="width:0;background:var(--accent)"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Cluster CPU</div>
+      <div class="value cyan" id="stat-cpu">0%</div>
+      <div class="bar"><div class="bar-fill" id="bar-cpu" style="width:0;background:var(--accent2)"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Memory Usage</div>
+      <div class="value green" id="stat-mem">0%</div>
+      <div class="bar"><div class="bar-fill" id="bar-mem" style="width:0;background:var(--success)"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Network I/O</div>
+      <div class="value" id="stat-net" style="color:var(--warn)">0 MB/s</div>
+    </div>
+
+    <h3>Cluster Config</h3>
+    <div class="cluster-info">
+      <div class="row"><span class="k">Nodes</span><span>8 workers</span></div>
+      <div class="row"><span class="k">Scheduler</span><span>Apple K8s</span></div>
+      <div class="row"><span class="k">Storage</span><span>Apple NVMe</span></div>
+      <div class="row"><span class="k">Region</span><span>us-east-1</span></div>
+      <div class="row"><span class="k">Uptime</span><span id="uptime">0d 0h 0m</span></div>
+    </div>
+
+    <h3>Containers</h3>
+    <div class="containers-list" id="containers-list"></div>
+  </div>
+
+  <div class="main">
+    <div id="topo-canvas-wrap">
+      <canvas id="topo-canvas"></canvas>
+    </div>
+    <div id="bottom-panel">
+      <div class="chart-box">
+        <h4>Resource Allocation</h4>
+        <canvas id="resource-chart" class="mini-chart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h4>Throughput (req/s)</h4>
+        <canvas id="throughput-chart" class="mini-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-panel">
+    <div class="event-log">
+      <h3>Event Log</h3>
+      <div class="log-entries" id="log-entries"></div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+// === Seeded PRNG ===
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rng=new mulberry32(42);
+
+// === Cluster state ===
+const NODES=[
+  {id:0,name:'orch-master',type:'master',x:0,y:0},
+  {id:1,name:'worker-01',type:'worker',x:0,y:0},
+  {id:2,name:'worker-02',type:'worker',x:0,y:0},
+  {id:3,name:'worker-03',type:'worker',x:0,y:0},
+  {id:4,name:'worker-04',type:'worker',x:0,y:0},
+  {id:5,name:'worker-05',type:'worker',x:0,y:0},
+  {id:6,name:'worker-06',type:'worker',x:0,y:0},
+  {id:7,name:'worker-07',type:'worker',x:0,y:0},
+  {id:8,name:'worker-08',type:'worker',x:0,y:0},
+];
+
+const SERVICES=[
+  {id:0,name:'llm-inference',node:1,cpu:72,mem:65,net:12,replicas:3,running:true},
+  {id:1,name:'vector-db',node:2,cpu:45,mem:78,net:8,replicas:2,running:true},
+  {id:2,name:'api-gateway',node:1,cpu:23,mem:30,net:45,replicas:4,running:true},
+  {id:3,name:'cache-redis',node:3,cpu:15,mem:55,net:5,replicas:2,running:true},
+  {id:4,name:'ml-training',node:4,cpu:91,mem:82,net:3,replicas:1,running:true},
+  {id:5,name:'log-collector',node:5,cpu:8,mem:12,net:30,replicas:1,running:true},
+  {id:6,name:'metrics-agent',node:2,cpu:5,mem:18,net:4,replicas:1,running:true},
+  {id:7,name:'model-server',node:6,cpu:67,mem:71,net:15,replicas:3,running:true},
+  {id:8,name:'task-queue',node:3,cpu:34,mem:40,net:6,replicas:2,running:true},
+  {id:9,name:'auth-proxy',node:7,cpu:12,mem:22,net:18,replicas:2,running:true},
+  {id:10,name:'data-pipeline',node:8,cpu:58,mem:63,net:10,replicas:1,running:true},
+  {id:11,name:'cron-scheduler',node:4,cpu:3,mem:8,net:1,replicas:1,running:true},
+];
+
+let deployments=[];
+let deployTarget=null;
+let deployProgress=0;
+
+// Layout positions (fixed)
+const CX=400,CY=250,R=180;
+NODES[0].x=CX;NODES[0].y=CY;
+for(let i=1;i<=8;i++){
+  const a=(i-1)*Math.PI*2/8-Math.PI/2;
+  NODES[i].x=CX+Math.cos(a)*R;
+  NODES[i].y=CY+Math.sin(a)*R;
+}
+
+// === Canvas setup ===
+const topoCanvas=document.getElementById('topo-canvas');
+const topoCtx=topoCanvas.getContext('2d');
+const resCanvas=document.getElementById('resource-chart');
+const resCtx=resCanvas.getContext('2d');
+const thrCanvas=document.getElementById('throughput-chart');
+const thrCtx=thrCanvas.getContext('2d');
+
+function resizeCanvases(){
+  const wrap=document.getElementById('topo-canvas-wrap');
+  topoCanvas.width=wrap.clientWidth;
+  topoCanvas.height=wrap.clientHeight;
+  resCanvas.width=resCanvas.parentElement.clientWidth-20;
+  resCanvas.height=80;
+  thrCanvas.width=thrCanvas.parentElement.clientWidth-20;
+  thrCanvas.height=80;
+}
+resizeCanvases();
+window.addEventListener('resize',resizeCanvases);
+
+// === Draw topology ===
+function drawTopology(t){
+  const W=topoCanvas.width,H=topoCanvas.height;
+  const scale=Math.min(W/1000,H/600);
+  const ox=W/2-CX*scale,oy=H/2-CY*scale;
+  topoCtx.clearRect(0,0,W,H);
+
+  // Grid background
+  topoCtx.strokeStyle='rgba(255,255,255,0.03)';
+  topoCtx.lineWidth=1;
+  const gs=40*scale;
+  for(let x=0;x<W;x+=gs){topoCtx.beginPath();topoCtx.moveTo(x,0);topoCtx.lineTo(x,H);topoCtx.stroke()}
+  for(let y=0;y<H;y+=gs){topoCtx.beginPath();topoCtx.moveTo(0,y);topoCtx.lineTo(W,y);topoCtx.stroke()}
+
+  // Draw connections from master to workers
+  for(let i=1;i<=8;i++){
+    const nx=NODES[i].x*scale+ox,ny=NODES[i].y*scale+oy;
+    const mx=NODES[0].x*scale+ox,my=NODES[0].y*scale+oy;
+    const grad=topoCtx.createLinearGradient(mx,my,nx,ny);
+    grad.addColorStop(0,'rgba(59,130,246,0.15)');
+    grad.addColorStop(1,'rgba(6,182,212,0.15)');
+    topoCtx.strokeStyle=grad;
+    topoCtx.lineWidth=1.5;
+    topoCtx.setLineDash([4,4]);
+    topoCtx.beginPath();
+    topoCtx.moveTo(mx,my);
+    topoCtx.lineTo(nx,ny);
+    topoCtx.stroke();
+    topoCtx.setLineDash([]);
+
+    // Moving particle on connection
+    const pt=(t*0.3+i*0.125)%1;
+    const px=mx+(nx-mx)*pt,py=my+(ny-my)*pt;
+    topoCtx.fillStyle='rgba(59,130,246,0.8)';
+    topoCtx.beginPath();
+    topoCtx.arc(px,py,2,0,Math.PI*2);
+    topoCtx.fill();
+  }
+
+  // Draw service rings on worker nodes
+  for(let i=1;i<=8;i++){
+    const nx=NODES[i].x*scale+ox,ny=NODES[i].y*scale+oy;
+    const servicesOnNode=SERVICES.filter(s=>s.node===i&&s.running);
+    servicesOnNode.forEach((svc,si)=>{
+      const angle=(si/servicesOnNode.length)*Math.PI*2+t*0.5;
+      const r=18*scale;
+      const sx=nx+Math.cos(angle)*r,sy=ny+Math.sin(angle)*r;
+
+      // Service circle
+      const cpuRatio=svc.cpu/100;
+      topoCtx.beginPath();
+      topoCtx.arc(sx,sy,6*scale,0,Math.PI*2);
+      topoCtx.fillStyle=cpuRatio>.8?'rgba(239,68,68,0.6)':cpuRatio>.5?'rgba(245,158,11,0.6)':'rgba(16,185,129,0.6)';
+      topoCtx.fill();
+      topoCtx.strokeStyle='rgba(255,255,255,0.2)';
+      topoCtx.lineWidth=1;
+      topoCtx.stroke();
+    });
+  }
+
+  // Master node (center)
+  const mx=NODES[0].x*scale+ox,my=NODES[0].y*scale+oy;
+  const masterR=20*scale;
+  const pulse=Math.sin(t*2)*0.15+1;
+  topoCtx.save();
+  topoCtx.shadowColor='rgba(59,130,246,0.5)';
+  topoCtx.shadowBlur=20*pulse;
+  topoCtx.beginPath();
+  topoCtx.arc(mx,my,masterR,0,Math.PI*2);
+  const mgr=topoCtx.createRadialGradient(mx,my,0,mx,my,masterR);
+  mgr.addColorStop(0,'#3b82f6');
+  mgr.addColorStop(1,'#1e3a8a');
+  topoCtx.fillStyle=mgr;
+  topoCtx.fill();
+  topoCtx.restore();
+
+  // Draw worker nodes
+  for(let i=1;i<=8;i++){
+    const nx=NODES[i].x*scale+ox,ny=NODES[i].y*scale+oy;
+    const wR=10*scale;
+    topoCtx.beginPath();
+    topoCtx.arc(nx,ny,wR,0,Math.PI*2);
+    const wgr=topoCtx.createRadialGradient(nx,ny,0,nx,ny,wR);
+    wgr.addColorStop(0,'#374151');
+    wgr.addColorStop(1,'#1f2937');
+    topoCtx.fillStyle=wgr;
+    topoCtx.fill();
+    topoCtx.strokeStyle='rgba(255,255,255,0.1)';
+    topoCtx.lineWidth=1;
+    topoCtx.stroke();
+  }
+
+  // Deploy animation
+  if(deployTarget!==null){
+    const progress=deployProgress;
+    const fromNode=deployTarget.fromNode;
+    const toNode=deployTarget.toNode;
+    const fx=NODES[fromNode].x*scale+ox,fy=NODES[fromNode].y*scale+oy;
+    const tx=NODES[toNode].x*scale+ox,ty=NODES[toNode].y*scale+oy;
+    // Animated particle traveling
+    const px=fx+(tx-fx)*progress;
+    const py=fy+(ty-fy)*progress;
+    const trailR=20*scale*(1-progress);
+    // Trail
+    for(let i=0;i<5;i++){
+      const tp=(progress-i*0.04)%1;
+      const tx2=fx+(tx-fx)*tp,ty2=fy+(ty-fy)*tp;
+      topoCtx.beginPath();
+      topoCtx.arc(tx2,ty2,3*scale*(1-i*0.15),0,Math.PI*2);
+      topoCtx.fillStyle=`rgba(59,130,246,${0.4-i*0.07})`;
+      topoCtx.fill();
+    }
+    // Main particle
+    topoCtx.save();
+    topoCtx.shadowColor='rgba(6,182,212,0.8)';
+    topoCtx.shadowBlur=12;
+    topoCtx.beginPath();
+    topoCtx.arc(px,py,5*scale,0,Math.PI*2);
+    topoCtx.fillStyle='#06b6d4';
+    topoCtx.fill();
+    topoCtx.restore();
+  }
+}
+
+// === Mini charts ===
+const cpuHistory=new Array(60).fill(0);
+const memHistory=new Array(60).fill(0);
+const thrHistory=new Array(60).fill(0);
+
+function drawMiniChart(ctx,csv,W,H,color,history){
+  ctx.clearRect(0,0,W,H);
+  // Background
+  ctx.fillStyle='rgba(255,255,255,0.02)';
+  ctx.fillRect(0,0,W,H);
+  // Grid lines
+  ctx.strokeStyle='rgba(255,255,255,0.05)';
+  ctx.lineWidth=1;
+  for(let y=0;y<H;y+=H/4){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+
+  // Line
+  const max=Math.max(...history,1);
+  ctx.beginPath();
+  ctx.moveTo(0,H-history[0]/max*H);
+  for(let i=1;i<60;i++){
+    ctx.lineTo(i/59*W,H-history[i]/max*H);
+  }
+  ctx.strokeStyle=color;
+  ctx.lineWidth=2;
+  ctx.stroke();
+  // Fill under
+  ctx.lineTo(W,H);
+  ctx.lineTo(0,H);
+  ctx.closePath();
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,color.replace(')',',0.2)').replace('rgb','rgba'));
+  grad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=grad;
+  ctx.fill();
+}
+
+// === Update stats ===
+function updateStats(){
+  const running=SERVICES.filter(s=>s.running).length;
+  const avgCPU=Math.round(SERVICES.reduce((a,s)=>a+s.cpu,0)/SERVICES.length);
+  const avgMem=Math.round(SERVICES.reduce((a,s)=>a+s.mem,0)/SERVICES.length);
+  const totalNet=SERVICES.reduce((a,s)=>a+s.net,0);
+
+  document.getElementById('stat-containers').textContent=running;
+  document.getElementById('bar-containers').style.width=`${running/14*100}%`;
+  document.getElementById('stat-cpu').textContent=avgCPU+'%';
+  document.getElementById('bar-cpu').style.width=avgCPU+'%';
+  document.getElementById('bar-cpu').style.background=avgCPU>70?'var(--danger)':avgCPU>50?'var(--warn)':'var(--accent2)';
+  document.getElementById('stat-mem').textContent=avgMem+'%';
+  document.getElementById('bar-mem').style.width=avgMem+'%';
+  document.getElementById('stat-net').textContent=totalNet.toFixed(0)+' MB/s';
+
+  cpuHistory.push(avgCPU+Math.sin(Date.now()/3000)*5);cpuHistory.shift();
+  memHistory.push(avgMem+Math.cos(Date.now()/5000)*3);memHistory.shift();
+  thrHistory.push(totalNet+Math.sin(Date.now()/2000)*8);thrHistory.shift();
+
+  drawMiniChart(resCtx,resCanvas,resCanvas.width,resCanvas.height,'rgb(59,130,246)',cpuHistory);
+  drawMiniChart(thrCtx,thrCanvas,thrCanvas.width,thrCanvas.height,'rgb(6,182,212)',thrHistory);
+}
+
+// === Render container cards ===
+function renderContainers(){
+  const list=document.getElementById('containers-list');
+  list.innerHTML='';
+  SERVICES.forEach(svc=>{
+    const card=document.createElement('div');
+    card.className='cont-card'+(svc.running?'':' stopped');
+    card.innerHTML=`
+      <div class="name">${svc.name} <span class="status-dot ${svc.running?'up':'stopped'}"></span></div>
+      <div class="meta">
+        <span>⚡${svc.cpu}%</span>
+        <span>💾${svc.mem}%</span>
+        <span>📡${svc.net}MB</span>
+        <span>🔄${svc.replicas}x</span>
+      </div>`;
+    card.onclick=()=>highlightService(svc.id);
+    list.appendChild(card);
+  });
+}
+
+let highlightSvc=null;
+function highlightService(id){highlightSvc=id}
+
+// === Deploy animation ===
+function triggerDeploy(){
+  const workers=SERVICES.filter(s=>s.running);
+  if(workers.length<2)return;
+  const from=workers[Math.floor(rng()*workers.length)];
+  const to=workers.filter(s=>s.id!==from.id)[Math.floor(rng()*(workers.filter(s=>s.id!==from.id).length))];
+  deployTarget={fromNode:from.node,toNode:to.node};
+  deployProgress=0;
+  addLog(`Deploying ${from.name} → ${to.name}`,'info');
+}
+
+// === Event log ===
+function addLog(msg,type='info'){
+  const el=document.getElementById('log-entries');
+  const now=new Date();
+  const ts=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const entry=document.createElement('div');
+  entry.className=`log-entry ${type}`;
+  entry.innerHTML=`<span class="ts">${ts}</span><span class="msg">${msg}</span>`;
+  el.prepend(entry);
+  while(el.children.length>50)el.removeChild(el.lastChild);
+}
+
+// === Uptime ===
+const startTime=Date.now();
+function updateUptime(){
+  const diff=Date.now()-startTime;
+  const d=Math.floor(diff/86400000);
+  const h=Math.floor((diff%86400000)/3600000);
+  const m=Math.floor((diff%3600000)/60000);
+  document.getElementById('uptime').textContent=`${d}d ${h}h ${m}m`;
+}
+
+// === Clock ===
+function updateClock(){
+  const now=new Date();
+  document.getElementById('clock').textContent=now.toLocaleString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// === View mode ===
+function setView(v){
+  document.querySelectorAll('.controls .btn').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+  // In a real app this would toggle views
+}
+
+// === Main loop ===
+let frame=0;
+function loop(ts){
+  const t=ts/1000;
+
+  // Update deploy progress
+  if(deployTarget){
+    deployProgress+=0.008;
+    if(deployProgress>=1){
+      addLog(`Deployment complete ✓`,'success');
+      deployTarget=null;
+      deployProgress=0;
+    }
+  }
+
+  // Draw topology
+  drawTopology(t);
+
+  // Update stats every 30 frames
+  if(++frame%30===0){
+    updateStats();
+    updateUptime();
+    updateClock();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// === Init ===
+addLog('Apple Container Orchestrator v4.2.1 initialized','success');
+addLog('Connected to 8 worker nodes','info');
+addLog('Loading 12 services from cluster config','info');
+setTimeout(()=>addLog('All services healthy','success'),1000);
+setTimeout(()=>addLog('Monitoring started','info'),2000);
+
+renderContainers();
+updateStats();
+updateUptime();
+updateClock();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
