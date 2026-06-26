@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apple Container Orchestrator Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0a1a;
+    --panel-bg: rgba(20, 20, 40, 0.85);
+    --border: rgba(100, 140, 255, 0.15);
+    --text: #c8c8e0;
+    --text-dim: #6a6a8a;
+    --accent: #4a9eff;
+    --accent2: #7c4dff;
+    --green: #34d399;
+    --red: #f87171;
+    --yellow: #fbbf24;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+  }
+  header h1 {
+    font-size: 18px; font-weight: 600; letter-spacing: -0.3px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header-stats { display: flex; gap: 24px; font-size: 13px; }
+  .header-stats span { color: var(--text-dim); }
+  .header-stats strong { color: var(--green); font-weight: 500; }
+  #main { display: flex; flex: 1; overflow: hidden; }
+  canvas#main-canvas { flex: 1; display: block; }
+  #sidebar {
+    width: 320px; display: flex; flex-direction: column;
+    background: var(--panel-bg); border-left: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+  }
+  #sidebar h2 {
+    padding: 14px 16px; font-size: 13px; font-weight: 600;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  #event-log {
+    flex: 1; overflow-y: auto; padding: 8px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 12px; line-height: 1.6;
+  }
+  #event-log::-webkit-scrollbar { width: 4px; }
+  #event-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .log-entry {
+    padding: 4px 8px; border-radius: 4px;
+    border-left: 2px solid var(--text-dim);
+    margin-bottom: 2px; animation: fadeIn 0.3s;
+  }
+  .log-entry.deploy { border-left-color: var(--green); background: rgba(52, 211, 153, 0.05); }
+  .log-entry.error { border-left-color: var(--red); background: rgba(248, 113, 113, 0.05); }
+  .log-entry.info { border-left-color: var(--accent); background: rgba(74, 158, 255, 0.05); }
+  .log-time { color: var(--text-dim); margin-right: 6px; }
+  .log-msg { color: var(--text); }
+  #controls {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #controls label { font-size: 12px; color: var(--text-dim); }
+  .btn-row { display: flex; gap: 8px; }
+  .btn {
+    flex: 1; padding: 8px 12px; border: 1px solid var(--border);
+    background: rgba(74, 158, 255, 0.1); color: var(--accent);
+    border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+    transition: all 0.2s; font-family: inherit;
+  }
+  .btn:hover { background: rgba(74, 158, 255, 0.2); }
+  .btn.active { background: rgba(74, 158, 255, 0.3); border-color: var(--accent); }
+  input[type="range"] {
+    -webkit-appearance: none; width: 100%; height: 4px;
+    background: var(--border); border-radius: 2px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    background: var(--accent); border-radius: 50%; cursor: pointer;
+  }
+  .speed-label { display: flex; justify-content: space-between; font-size: 12px; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  @media (max-width: 900px) {
+    #sidebar { width: 240px; }
+  }
+  @media (max-width: 700px) {
+    #main { flex-direction: column; }
+    #sidebar { width: 100%; height: 40%; border-left: none; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🍎 Container Orchestrator</h1>
+    <div class="header-stats">
+      <span>Nodes: <strong id="node-count">5</strong></span>
+      <span>Services: <strong id="service-count">0</strong></span>
+      <span>Deployments: <strong id="deploy-count">0</strong></span>
+    </div>
+  </header>
+  <div id="main">
+    <canvas id="main-canvas"></canvas>
+    <div id="sidebar">
+      <h2>📋 Event Log</h2>
+      <div id="event-log"></div>
+      <div id="controls">
+        <div class="speed-label">
+          <label>Speed</label>
+          <span id="speed-val">1.0×</span>
+        </div>
+        <input type="range" id="speed-slider" min="0.1" max="3" step="0.1" value="1">
+        <div class="speed-label">
+          <label>Node Density</label>
+          <span id="density-val">5 nodes</span>
+        </div>
+        <input type="range" id="density-slider" min="3" max="12" step="1" value="5">
+        <div class="btn-row">
+          <button class="btn" id="btn-deploy">🚀 Deploy</button>
+          <button class="btn" id="btn-rollout">↻ Rollout</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// --- Seeded PRNG (Mulberry32) ---
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(987654321);
+
+// --- State ---
+let speed = 1.0;
+let nodeCount = 5;
+let deployCount = 0;
+let time = 0;
+let deploying = false;
+let deployingFrom = -1;
+let deployProgress = 0;
+
+const serviceNames = ['web', 'api', 'worker', 'cache', 'queue', 'auth', 'metrics', 'scheduler'];
+const nodeNames = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'theta', 'iota', 'kappa', 'lambda'];
+
+class Node {
+  constructor(name, x, y) {
+    this.name = name;
+    this.x = x; this.y = y;
+    this.cpu = 0; this.memory = 0;
+    this.services = [];
+    this.targetCpu = rng();
+    this.targetMemory = rng();
+    this.color = `hsl(${210 + rng() * 30}, 80%, 65%)`;
+  }
+  update(dt) {
+    const lerp = 0.02 * dt * speed;
+    this.cpu += (this.targetCpu - this.cpu) * lerp;
+    this.memory += (this.targetMemory - this.memory) * lerp;
+    if (Math.abs(this.cpu - this.targetCpu) < 0.01) this.targetCpu = rng();
+    if (Math.abs(this.memory - this.targetMemory) < 0.01) this.targetMemory = rng();
+    this.services = [];
+    const count = Math.floor(rng() * 3) + 1;
+    for (let i = 0; i < count; i++) this.services.push(serviceNames[Math.floor(rng() * serviceNames.length)]);
+  }
+}
+
+let nodes = [];
+let masterPos = { x: 0, y: 0 };
+let particles = [];
+let logEntries = [];
+
+function initNodes() {
+  nodes = [];
+  for (let i = 0; i < nodeCount; i++) {
+    const name = nodeNames[i] || `node-${i}`;
+    nodes.push(new Node(name, 0, 0));
+  }
+  repositionNodes();
+}
+
+function repositionNodes() {
+  const cw = canvas.width, ch = canvas.height;
+  masterPos = { x: cw * 0.4, y: ch * 0.5 };
+  const radius = Math.min(cw, ch) * 0.28;
+  for (let i = 0; i < nodes.length; i++) {
+    const angle = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+    nodes[i].x = masterPos.x + Math.cos(angle) * radius;
+    nodes[i].y = masterPos.y + Math.sin(angle) * radius;
+  }
+  document.getElementById('node-count').textContent = nodes.length;
+  document.getElementById('service-count').textContent = nodes.reduce((s, n) => s + n.services.length, 0);
+}
+
+function addLog(msg, type = 'info') {
+  const el = document.getElementById('event-log');
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const now = new Date();
+  const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+  entry.innerHTML = `<span class="log-time">[${ts}]</span><span class="log-msg">${msg}</span>`;
+  el.insertBefore(entry, el.firstChild);
+  while (el.children.length > 50) el.removeChild(el.lastChild);
+}
+
+// --- Canvas ---
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  const parent = canvas.parentElement;
+  canvas.width = parent.clientWidth * (window.devicePixelRatio > 1 ? 2 : 1);
+  canvas.height = parent.clientHeight * (window.devicePixelRatio > 1 ? 2 : 1);
+  ctx.setTransform(window.devicePixelRatio > 1 ? 2 : 1, 0, 0, window.devicePixelRatio > 1 ? 2 : 1, 0, 0);
+  canvas.style.width = parent.clientWidth + 'px';
+  canvas.style.height = parent.clientHeight + 'px';
+  if (nodes.length) repositionNodes();
+}
+window.addEventListener('resize', resize);
+
+// --- Drawing helpers ---
+function drawGlowCircle(x, y, r, color, glowSize = 12) {
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = glowSize;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawRing(cx, cy, outerR, innerR, progress, color) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, progress));
+  ctx.arc(cx, cy, innerR, -Math.PI / 2 + Math.PI * 2 * Math.min(1, progress), -Math.PI / 2, true);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawParticleLine(x1, y1, x2, y2, color, progress = 1) {
+  const mx = x1 + (x2 - x1) * progress;
+  const my = y1 + (y2 - y1) * progress;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.globalAlpha = 0.3;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+  // particle dot
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc(mx, my, 3, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+// --- Deploy animation ---
+function startDeploy(fromNode) {
+  deploying = true;
+  deployingFrom = fromNode;
+  deployProgress = 0;
+  deployCount++;
+  document.getElementById('deploy-count').textContent = deployCount;
+  addLog(`🚀 Deploying to ${nodes[fromNode].name} node...`, 'deploy');
+  setTimeout(() => addLog(`✅ Deployment complete on ${nodes[fromNode].name}`, 'deploy'), 1500);
+}
+
+function updateDeploy(dt) {
+  if (!deploying) return;
+  deployProgress += (0.4 * speed * dt);
+  if (deployProgress >= 1) {
+    deploying = false;
+    deployProgress = 1;
+    // spawn arrival particles
+    for (let i = 0; i < 12; i++) {
+      particles.push({
+        x: nodes[deployingFrom].x, y: nodes[deployingFrom].y,
+        vx: (rng() - 0.5) * 4, vy: (rng() - 0.5) * 4,
+        life: 1, maxLife: 1, color: '#34d399', size: 3
+      });
+    }
+  }
+}
+
+// --- Main render ---
+function render() {
+  const w = canvas.width / (window.devicePixelRatio > 1 ? 2 : 1);
+  const h = canvas.height / (window.devicePixelRatio > 1 ? 2 : 1);
+  ctx.clearRect(0, 0, w, h);
+
+  // Background grid
+  ctx.save();
+  ctx.strokeStyle = 'rgba(100, 140, 255, 0.04)';
+  ctx.lineWidth = 0.5;
+  const gridSize = 40;
+  for (let x = 0; x < w; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+  for (let y = 0; y < h; y += gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  ctx.restore();
+
+  // Connection lines
+  for (let i = 0; i < nodes.length; i++) {
+    drawParticleLine(masterPos.x, masterPos.y, nodes[i].x, nodes[i].y, 'rgba(74, 158, 255, 0.15)', 0.5);
+  }
+
+  // Deploy animation
+  if (deploying && deployingFrom >= 0) {
+    const fromX = masterPos.x, fromY = masterPos.y;
+    const toX = nodes[deployingFrom].x, toY = nodes[deployingFrom].y;
+    const progress = Math.min(deployProgress, 1);
+    // Transit particles
+    for (let j = 0; j < 3; j++) {
+      const offset = (j / 3 - 0.5) * 15;
+      const perpX = -(toY - fromY) * offset / Math.hypot(toX - fromX, toY - fromY) || offset;
+      const perpY = (toX - fromX) * offset / Math.hypot(toX - fromX, toY - fromY) || offset;
+      const px = fromX + (toX - fromX) * progress + perpX;
+      const py = fromY + (toY - fromY) * progress + perpY;
+      ctx.save();
+      ctx.shadowColor = '#34d399';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#34d399';
+      ctx.fill();
+      ctx.restore();
+    }
+    // Progress arc on connection
+    ctx.save();
+    ctx.strokeStyle = 'rgba(52, 211, 153, 0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(fromX + (toX - fromX) * progress, fromY + (toY - fromY) * progress);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Master node
+  drawGlowCircle(masterPos.x, masterPos.y, 28, 'rgba(74, 158, 255, 0.6)', 25);
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.font = '24px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🍎', masterPos.x, masterPos.y);
+  ctx.restore();
+
+  // Label master
+  ctx.save();
+  ctx.fillStyle = 'rgba(74, 158, 255, 0.8)';
+  ctx.font = 'bold 11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('MASTER', masterPos.x, masterPos.y + 42);
+  ctx.restore();
+
+  // Worker nodes
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const pulse = 1 + 0.05 * Math.sin(time * 2 + i);
+
+    // Node body
+    drawGlowCircle(node.x, node.y, 22 * pulse, node.color + '44', 18);
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, 22 * pulse, 0, Math.PI * 2);
+    ctx.strokeStyle = node.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // CPU ring
+    drawRing(node.x, node.y, 26, 22, node.cpu, 'rgba(52, 211, 153, 0.7)');
+
+    // Memory ring
+    drawRing(node.x, node.y, 30, 26, node.memory, 'rgba(124, 77, 255, 0.5)');
+
+    // Service labels
+    if (node.services.length > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(200, 200, 224, 0.5)';
+      ctx.font = '9px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(node.services.slice(0, 3).join(', '), node.x, node.y + 38);
+      ctx.restore();
+    }
+
+    // Node label
+    ctx.save();
+    ctx.fillStyle = 'rgba(200, 200, 224, 0.7)';
+    ctx.font = 'bold 11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(node.name.toUpperCase(), node.x, node.y + 50);
+    ctx.restore();
+
+    // CPU meter bar
+    const barW = 40, barH = 4;
+    const barX = node.x - barW / 2, barY = node.y + 56;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(barX, barY, barW, barH);
+    const cpuColor = node.cpu > 0.7 ? '#f87171' : node.cpu > 0.4 ? '#fbbf24' : '#34d399';
+    ctx.fillStyle = cpuColor;
+    ctx.fillRect(barX, barY, barW * node.cpu, barH);
+
+    // Memory meter bar
+    const barY2 = barY + 7;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(barX, barY2, barW, barH);
+    ctx.fillStyle = 'rgba(124, 77, 255, 0.7)';
+    ctx.fillRect(barX, barY2, barW * node.memory, barH);
+  }
+
+  // Floating particles (ambient data flow)
+  for (let i = 0; i < 20; i++) {
+    const angle = time * 0.3 + i * Math.PI * 2 / 20;
+    const radius = 80 + Math.sin(time + i) * 20;
+    const px = masterPos.x + Math.cos(angle) * radius;
+    const py = masterPos.y + Math.sin(angle) * radius;
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = '#4a9eff';
+    ctx.beginPath();
+    ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Deployed particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * speed * 0.5;
+    p.y += p.vy * speed * 0.5;
+    p.life -= 0.02 * speed;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // CRT scanline effect
+  ctx.save();
+  ctx.globalAlpha = 0.03;
+  for (let y = 0; y < h; y += 3) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, y, w, 1);
+  }
+  ctx.restore();
+}
+
+// --- Event loop ---
+let lastTime = 0;
+let deployTimer = 0;
+function loop(ts) {
+  const dt = Math.min((ts - lastTime) / 16.67, 3);
+  lastTime = ts;
+  time += dt * 0.016 * speed;
+
+  // Update nodes
+  for (const node of nodes) node.update(dt);
+
+  // Update deploy
+  updateDeploy(dt);
+
+  // Auto-deploy
+  deployTimer += dt;
+  if (deployTimer > 300 / speed) {
+    deployTimer = 0;
+    const fromNode = Math.floor(rng() * nodes.length);
+    startDeploy(fromNode);
+  }
+
+  // Periodic log
+  if (Math.floor(time * 2) % 8 === 0 && Math.random() < 0.1) {
+    const msgs = [
+      `Health check ${nodes[Math.floor(rng() * nodes.length)].name}: OK`,
+      `Container restart: worker-${Math.floor(rng() * 5)}`,
+      `Config synced: ${nodes[Math.floor(rng() * nodes.length)].name}`,
+      `Scaling: +1 replica on ${nodes[Math.floor(rng() * nodes.length)].name}`,
+      `SSL cert renewal: 28 days remaining`,
+      `Database backup completed`,
+      `Cache invalidation: redis-prod-${Math.floor(rng() * 3)}`,
+      `DNS propagation: api.example.com → ${nodes[Math.floor(rng() * nodes.length)].name}`,
+    ];
+    addLog(msgs[Math.floor(rng() * msgs.length)], 'info');
+  }
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+// --- Controls ---
+document.getElementById('speed-slider').addEventListener('input', (e) => {
+  speed = parseFloat(e.target.value);
+  document.getElementById('speed-val').textContent = speed.toFixed(1) + '×';
+});
+
+document.getElementById('density-slider').addEventListener('input', (e) => {
+  nodeCount = parseInt(e.target.value);
+  document.getElementById('density-val').textContent = nodeCount + ' nodes';
+  initNodes();
+  addLog(`Cluster resized: ${nodeCount} nodes`, 'deploy');
+});
+
+document.getElementById('btn-deploy').addEventListener('click', () => {
+  const target = Math.floor(rng() * nodes.length);
+  startDeploy(target);
+  addLog(`Manual deploy triggered → ${nodes[target].name}`, 'deploy');
+});
+
+document.getElementById('btn-rollout').addEventListener('click', () => {
+  addLog('🔄 Rolling update initiated across all nodes', 'deploy');
+  for (let i = 0; i < nodes.length; i++) {
+    setTimeout(() => {
+      startDeploy(i);
+      addLog(`Rollout step ${i + 1}/${nodes.length} → ${nodes[i].name}`, 'deploy');
+    }, i * 800);
+  }
+});
+
+// --- Init ---
+resize();
+initNodes();
+addLog('🍎 Apple Container Orchestrator initialized', 'deploy');
+addLog('📡 Connecting to master node...', 'info');
+addLog('✅ All nodes healthy', 'deploy');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
